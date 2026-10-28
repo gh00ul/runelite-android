@@ -25,6 +25,8 @@ internal object UpdateChecker
     private const val TAG = "UpdateChecker"
     private const val REPO = "zeruth/runelite-android"
     private const val API = "https://api.github.com/repos/$REPO"
+    /** Releases come from the repo this build was configured with, so a fork can self-update; credits stay upstream's. */
+    private val RELEASES_API = "https://api.github.com/repos/${BuildConfig.UPDATE_REPO}"
     private const val PREFS = "update_checker"
     private const val CONTRIBUTORS_TTL_MS = 24L * 60 * 60 * 1000
 
@@ -39,8 +41,8 @@ internal object UpdateChecker
     /** Used until the first successful fetch (eg. first launch offline). */
     private val FALLBACK_CONTRIBUTORS = listOf("zeruth", "JayBuckley7", "torkkotravis-creator")
 
-    /** This build's release tag, in the same format CI tags releases with. */
-    val currentTag: String get() = BuildConfig.RELEASE_TAG
+    /** This build's release tag, in the same format CI tags releases with (plus a fork's "-N"). */
+    val currentTag: String get() = BuildConfig.RELEASE_TAG + BuildConfig.FORK_SUFFIX
 
     data class Release(val tag: String, val apkName: String, val apkUrl: String, val apkSize: Long)
 
@@ -49,7 +51,7 @@ internal object UpdateChecker
     {
         return try
         {
-            val json = JSONObject(get("$API/releases/latest"))
+            val json = JSONObject(get("$RELEASES_API/releases/latest"))
             val tag = json.getString("tag_name")
             if (compareTags(tag, currentTag) <= 0) return null
             val assets = json.getJSONArray("assets")

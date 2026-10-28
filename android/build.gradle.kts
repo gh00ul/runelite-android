@@ -378,6 +378,16 @@ if (androidSdkAvailable) {
             // themselves, so they can turn the update check off: -PruneliteMp.autoUpdate=false
             buildConfigField("boolean", "AUTO_UPDATE",
                 providers.gradleProperty("runeliteMp.autoUpdate").getOrElse("true").toBoolean().toString())
+            // A fork's own rebuilds of one upstream release add -PruneliteMp.forkRevision=N;
+            // UpdateChecker appends "-N" to RELEASE_TAG so each compares newer than the last
+            // (tags compare numerically per segment). Kept apart from releaseTag, which
+            // upstream rewrites on every release.
+            val forkRevision = providers.gradleProperty("runeliteMp.forkRevision").orNull
+            buildConfigField("String", "FORK_SUFFIX", "\"${forkRevision?.let { "-$it" } ?: ""}\"")
+            // Where UpdateChecker looks for releases; forks point it at their own:
+            // -PruneliteMp.updateRepo=owner/name
+            buildConfigField("String", "UPDATE_REPO",
+                "\"${providers.gradleProperty("runeliteMp.updateRepo").getOrElse("zeruth/runelite-android")}\"")
             // Anti-tamper hook. SignatureGuard reads this field at MainActivity init and
             // refuses to run when the on-device APK's signing SHA-256 doesn't match.
             // Default is empty (= skip), so debug builds and release-with-debug-fallback
