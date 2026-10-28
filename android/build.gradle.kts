@@ -383,6 +383,10 @@ if (androidSdkAvailable) {
             // (tags compare numerically per segment). Kept apart from releaseTag, which
             // upstream rewrites on every release.
             val forkRevision = providers.gradleProperty("runeliteMp.forkRevision").orNull
+            // compareTags reads a non-number as 0, which would silently stop fork updates.
+            require(forkRevision == null || forkRevision.toIntOrNull() != null) {
+                "runeliteMp.forkRevision must be a whole number, got '$forkRevision'"
+            }
             buildConfigField("String", "FORK_SUFFIX", "\"${forkRevision?.let { "-$it" } ?: ""}\"")
             // Where UpdateChecker looks for releases; forks point it at their own:
             // -PruneliteMp.updateRepo=owner/name
