@@ -254,8 +254,16 @@ if (androidSdkAvailable) {
             // {patch ↑, minor ↑ with patch reset, major ↑ with minor+patch reset}.
             versionCode = (versionMajor * 1_000_000) + (versionMinor * 1_000) + versionPatch
             versionName = project.version.toString()
-            // Same tag CI publishes releases under; UpdateChecker compares against it.
-            buildConfigField("String", "RELEASE_TAG", "\"$versionMajor.$versionMinor.${versionPatch}_${project.version}\"")
+            // Same tag CI publishes releases under; UpdateChecker compares against it. A fork's
+            // own rebuilds of one upstream version add -PruneliteMp.forkRevision=N, so each
+            // compares newer than the last (tags compare numerically per segment).
+            val forkRevision = providers.gradleProperty("runeliteMp.forkRevision").orNull
+            buildConfigField("String", "RELEASE_TAG",
+                "\"$versionMajor.$versionMinor.${versionPatch}_${project.version}${forkRevision?.let { "-$it" } ?: ""}\"")
+            // Where UpdateChecker looks for releases; forks point it at their own:
+            // -PruneliteMp.updateRepo=owner/name
+            buildConfigField("String", "UPDATE_REPO",
+                "\"${providers.gradleProperty("runeliteMp.updateRepo").getOrElse("zeruth/runelite-android")}\"")
             // Self-builds signed with another key can't install the official releases over
             // themselves, so they can turn the update check off: -PruneliteMp.autoUpdate=false
             buildConfigField("boolean", "AUTO_UPDATE",

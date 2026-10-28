@@ -7,14 +7,15 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
 import android.os.Build
 import android.os.SystemClock
+import android.os.VibrationAttributes
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.util.Log
 import java.awt.TrayIcon
-import java.util.concurrent.atomic.AtomicInteger
 import java.util.function.Consumer
 import net.runelite.client.config.NotificationSound
 import net.runelite.client.eventbus.EventBus
@@ -46,13 +47,11 @@ internal object AndroidNotifier
     private const val TAG = "AndroidNotifier"
     private const val CHANNEL_ALERTS = "runelite_alerts"
     private const val GROUP_ALERTS = "net.runelite.mp.ALERTS"
-    private const val FIRST_ID = 0x4000
+    /** Alerts are told apart by tag (their message); the id is shared. */
+    private const val ALERT_ID = 0x4000
     /** Plugins can fire several notifications in one tick; one buzz is enough. */
     private const val VIBRATE_DEBOUNCE_MS = 1_500L
     private val ALERT_PATTERN = longArrayOf(0, 180, 120, 180)
-
-    private val nextId = AtomicInteger(FIRST_ID)
-    private val activeIds = java.util.concurrent.ConcurrentHashMap.newKeySet<Int>()
 
     @Volatile private var appContext: Context? = null
     @Volatile private var registered = false
@@ -66,6 +65,8 @@ internal object AndroidNotifier
         val ctx = context.applicationContext
         appContext = ctx
         createChannel(ctx)
+        // Alerts left over from a previous run are stale once the game is back on screen.
+        if (inForeground) clearAlerts()
 
         val bus = RuneLiteAccess.instance(EventBus::class.java)
         if (bus == null)
@@ -78,7 +79,7 @@ internal object AndroidNotifier
         Log.i(TAG, "listening for RuneLite notifications")
     }
 
-    /** Driven by MainActivity.onStart / onStop. */
+    /** Driven by MainActivity: true while the game is on screen and the app in use. */
     fun setForeground(foreground: Boolean)
     {
         inForeground = foreground
@@ -137,9 +138,9 @@ internal object AndroidNotifier
             .setContentIntent(openAppIntent(ctx))
             .build()
 
-        val id = nextId.getAndIncrement()
-        activeIds += id
-        manager.notify(id, built)
+        // Tagged by message, so a repeat (Idle Notifier firing again) replaces the old alert
+        // and alerts afresh instead of stacking up copies.
+        manager.notify(message, ALERT_ID, built)
         // The channel vibrates on its own; don't double-buzz right after.
         lastVibrate = SystemClock.elapsedRealtime()
     }
@@ -160,15 +161,27 @@ internal object AndroidNotifier
             ctx.getSystemService(Vibrator::class.java)
         }
         if (vibrator?.hasVibrator() != true) return
-        vibrator.vibrate(VibrationEffect.createWaveform(ALERT_PATTERN, -1))
+        val effect = VibrationEffect.createWaveform(ALERT_PATTERN, -1)
+        // Marked as a notification buzz so the phone's notification vibration, silent mode
+        // and Do Not Disturb settings apply to it.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+        {
+            vibrator.vibrate(effect, VibrationAttributes.createForUsage(VibrationAttributes.USAGE_NOTIFICATION))
+        }
+        else
+        {
+            @Suppress("DEPRECATION")
+            vibrator.vibrate(effect, AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_NOTIFICATION).build())
+        }
     }
 
+    /** Asks the system what's showing rather than remembering ids, so a restart doesn't strand any. */
     private fun clearAlerts()
     {
         val manager = appContext?.getSystemService(NotificationManager::class.java) ?: return
-        val ids = activeIds.toList()
-        activeIds.clear()
-        ids.forEach { manager.cancel(it) }
+        manager.activeNotifications
+            .filter { it.notification.channelId == CHANNEL_ALERTS }
+            .forEach { manager.cancel(it.tag, it.id) }
     }
 
     private fun createChannel(ctx: Context)

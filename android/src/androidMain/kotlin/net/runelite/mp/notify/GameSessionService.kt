@@ -1,12 +1,15 @@
 package net.runelite.mp.notify
 
+import android.app.ActivityManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.graphics.drawable.Icon
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
@@ -29,6 +32,7 @@ class GameSessionService : Service()
         private const val TAG = "GameSessionService"
         private const val CHANNEL = "runelite_session"
         private const val ID = 0x5E55
+        private const val ACTION_QUIT = "net.runelite.mp.notify.QUIT"
 
         fun start(context: Context)
         {
@@ -54,6 +58,16 @@ class GameSessionService : Service()
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int
     {
+        if (intent?.action == ACTION_QUIT)
+        {
+            // The notification's Quit button: like swiping RuneLite away in Recents, but
+            // exiting normally so the client's shutdown hooks still run.
+            getSystemService(ActivityManager::class.java)?.appTasks?.forEach { it.finishAndRemoveTask() }
+            stopSelf()
+            Runtime.getRuntime().exit(0)
+            return START_NOT_STICKY
+        }
+
         val manager = getSystemService(NotificationManager::class.java)
         if (manager != null && manager.getNotificationChannel(CHANNEL) == null)
         {
@@ -73,6 +87,11 @@ class GameSessionService : Service()
             .setOngoing(true)
             .setShowWhen(false)
             .setContentIntent(AndroidNotifier.openAppIntent(this))
+            .addAction(Notification.Action.Builder(
+                Icon.createWithResource(this, R.drawable.ic_stat_runelite), "Quit",
+                PendingIntent.getService(this, 0, Intent(this, GameSessionService::class.java).setAction(ACTION_QUIT),
+                    PendingIntent.FLAG_IMMUTABLE)
+            ).build())
             .build()
 
         try

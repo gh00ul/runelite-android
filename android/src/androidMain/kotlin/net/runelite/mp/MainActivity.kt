@@ -31,15 +31,31 @@ class MainActivity : ComponentActivity() {
     }
     private lateinit var swingDialogs: net.runelite.mp.ui.bridge.SwingDialogs
 
+    // On screen but not the app in use (split screen, pop-up view) counts as background for
+    // alerts, so they arrive as notifications rather than a buzz from the other half.
+    private var started = false
+    private var topResumed = true
+
     override fun onStart() {
         super.onStart()
-        net.runelite.mp.notify.AndroidNotifier.setForeground(true)
+        started = true
+        updateAlertForeground()
     }
 
     override fun onStop() {
-        net.runelite.mp.notify.AndroidNotifier.setForeground(false)
+        started = false
+        updateAlertForeground()
         super.onStop()
     }
+
+    override fun onTopResumedActivityChanged(isTopResumedActivity: Boolean) {
+        super.onTopResumedActivityChanged(isTopResumedActivity)
+        topResumed = isTopResumedActivity
+        updateAlertForeground()
+    }
+
+    private fun updateAlertForeground() =
+        net.runelite.mp.notify.AndroidNotifier.setForeground(started && topResumed)
 
     override fun onDestroy() {
         // Leaving for real (not a config change): drop the background session too.
