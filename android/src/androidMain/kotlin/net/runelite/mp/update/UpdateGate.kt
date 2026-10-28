@@ -53,6 +53,11 @@ internal object UpdateGate
     suspend fun checkThenBoot(context: Context, scope: CoroutineScope, boot: () -> Unit)
     {
         if (bootStarted) return
+        if (!net.runelite.mp.BuildConfig.AUTO_UPDATE)
+        {
+            startBoot(boot)
+            return
+        }
         autoUpdate = true
         // Blocking IO can't be cancelled, so time out the await rather than the request.
         val check = scope.async(Dispatchers.IO) { UpdateChecker.newerRelease() }

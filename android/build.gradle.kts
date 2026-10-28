@@ -374,6 +374,10 @@ if (androidSdkAvailable) {
             versionCode = releaseVersionCode
             versionName = releaseTag
             buildConfigField("String", "RELEASE_TAG", "\"$releaseTag\"")
+            // Self-builds signed with another key can't install the official releases over
+            // themselves, so they can turn the update check off: -PruneliteMp.autoUpdate=false
+            buildConfigField("boolean", "AUTO_UPDATE",
+                providers.gradleProperty("runeliteMp.autoUpdate").getOrElse("true").toBoolean().toString())
             // Anti-tamper hook. SignatureGuard reads this field at MainActivity init and
             // refuses to run when the on-device APK's signing SHA-256 doesn't match.
             // Default is empty (= skip), so debug builds and release-with-debug-fallback

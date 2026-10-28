@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Status-bar icon: a hexagon with a bell, white-on-transparent as Android requires. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M12,1.5L21.1,6.75L21.1,17.25L12,22.5L2.9,17.25L2.9,6.75Z M12,3.8L4.9,7.9L4.9,16.1L12,20.2L19.1,16.1L19.1,7.9Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M12,6.8C9.9,6.8 8.6,8.4 8.6,10.4L8.6,13.4L7.5,14.6L7.5,15.3L16.5,15.3L16.5,14.6L15.4,13.4L15.4,10.4C15.4,8.4 14.1,6.8 12,6.8Z M10.6,16.1C10.8,16.9 11.3,17.4 12,17.4C12.7,17.4 13.2,16.9 13.4,16.1Z" />
+</vector>
