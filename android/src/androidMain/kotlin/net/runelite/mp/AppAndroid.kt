@@ -143,6 +143,10 @@ fun AndroidApp() {
     val booted = net.runelite.mp.ui.WindowImpl.bootComplete.value
     LaunchedEffect(booted) {
         if (!booted) return@LaunchedEffect
+        // RuneLite alerts → Android notifications, and keep the client alive in the
+        // background so they can still fire.
+        net.runelite.mp.notify.AndroidNotifier.start(context)
+        net.runelite.mp.notify.GameSessionService.start(context)
         if (net.runelite.mp.update.UpdateGate.isWatch(context))
         {
             net.runelite.mp.wear.WatchConfigServer.start(context)

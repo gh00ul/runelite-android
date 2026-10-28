@@ -31,7 +31,19 @@ class MainActivity : ComponentActivity() {
     }
     private lateinit var swingDialogs: net.runelite.mp.ui.bridge.SwingDialogs
 
+    override fun onStart() {
+        super.onStart()
+        net.runelite.mp.notify.AndroidNotifier.setForeground(true)
+    }
+
+    override fun onStop() {
+        net.runelite.mp.notify.AndroidNotifier.setForeground(false)
+        super.onStop()
+    }
+
     override fun onDestroy() {
+        // Leaving for real (not a config change): drop the background session too.
+        if (isFinishing) net.runelite.mp.notify.GameSessionService.stop(applicationContext)
         net.runelite.client.plugins.mobile.MobileDisplaySettings.detach()
         if (::swingDialogs.isInitialized) swingDialogs.close()
         super.onDestroy()
