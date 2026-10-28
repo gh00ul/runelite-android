@@ -34,12 +34,18 @@ class MainActivity : ComponentActivity() {
     // On screen but not the app in use (split screen, pop-up view) counts as background for
     // alerts, so they arrive as notifications rather than a buzz from the other half.
     private var started = false
-    private var topResumed = true
+    // API 29+ reports gaining the top spot (after onResume), so start without it: opening in
+    // the unfocused half of split screen then counts as background. Older APIs never report.
+    private var topResumed = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
 
     override fun onStart() {
         super.onStart()
         started = true
         updateAlertForeground()
+        // Retry here in case the first start, at boot, came while the app wasn't on screen
+        // (Android refuses foreground services then). On screen now, so it's allowed.
+        if (net.runelite.mp.ui.WindowImpl.bootComplete.value)
+            net.runelite.mp.notify.GameSessionService.start(applicationContext)
     }
 
     override fun onStop() {

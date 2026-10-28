@@ -8,6 +8,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.media.AudioAttributes
+import android.media.AudioManager
 import android.os.Build
 import android.os.SystemClock
 import android.os.VibrationAttributes
@@ -38,7 +39,8 @@ import net.runelite.mp.ui.bridge.RuneLiteAccess
  *    (Android mirrors it to a paired watch), otherwise a vibration if sound is on.
  *  - App on screen: a vibration only, unless "Send notifications when focused" is on, in
  *    which case it's the full notification. On a phone the game stays on screen for a whole
- *    AFK session, so a buzz is the useful equivalent of the desktop's beep.
+ *    AFK session, so a buzz is the useful equivalent of the desktop's beep. When silent mode
+ *    or Do Not Disturb would mute that buzz, the notification is shown instead.
  *
  * Stale alerts are cleared when the player comes back to the app.
  */
@@ -47,8 +49,9 @@ internal object AndroidNotifier
     private const val TAG = "AndroidNotifier"
     private const val CHANNEL_ALERTS = "runelite_alerts"
     private const val GROUP_ALERTS = "net.runelite.mp.ALERTS"
-    /** Alerts are told apart by tag (their message); the id is shared. */
+    /** Alerts are told apart by tag (their message, numbers masked); the id is shared. */
     private const val ALERT_ID = 0x4000
+    private val DIGITS = Regex("\\d+")
     /** Plugins can fire several notifications in one tick; one buzz is enough. */
     private const val VIBRATE_DEBOUNCE_MS = 1_500L
     private val ALERT_PATTERN = longArrayOf(0, 180, 120, 180)
@@ -97,7 +100,12 @@ internal object AndroidNotifier
         {
             when
             {
-                inForeground && !notification.isSendWhenFocused -> if (soundOn) vibrate(ctx)
+                inForeground && !notification.isSendWhenFocused -> if (soundOn)
+                {
+                    // The buzz is the whole alert here; if the phone would mute it, show the
+                    // notification so the alert isn't lost.
+                    if (notification.isTray && buzzMuted(ctx)) post(ctx, message, event.type) else vibrate(ctx)
+                }
                 notification.isTray -> post(ctx, message, event.type)
                 soundOn -> vibrate(ctx)
             }
@@ -113,9 +121,11 @@ internal object AndroidNotifier
     private fun post(ctx: Context, message: String, type: TrayIcon.MessageType?)
     {
         val manager = ctx.getSystemService(NotificationManager::class.java) ?: return
-        if (!manager.areNotificationsEnabled())
+        val channelOff = manager.getNotificationChannel(CHANNEL_ALERTS)?.importance == NotificationManager.IMPORTANCE_NONE
+        if (!manager.areNotificationsEnabled() || channelOff)
         {
-            // POST_NOTIFICATIONS denied: still get the player's attention.
+            // POST_NOTIFICATIONS denied, or just "Game alerts" turned off: the notification
+            // would be dropped, so still get the player's attention.
             vibrate(ctx)
             return
         }
@@ -138,9 +148,9 @@ internal object AndroidNotifier
             .setContentIntent(openAppIntent(ctx))
             .build()
 
-        // Tagged by message, so a repeat (Idle Notifier firing again) replaces the old alert
-        // and alerts afresh instead of stacking up copies.
-        manager.notify(message, ALERT_ID, built)
+        // Tagged by message with numbers masked, so a repeat ("You are now idle!" again, or
+        // "HP is 9" then "HP is 7") replaces the old alert and alerts afresh instead of stacking.
+        manager.notify(message.replace(DIGITS, "#"), ALERT_ID, built)
         // The channel vibrates on its own; don't double-buzz right after.
         lastVibrate = SystemClock.elapsedRealtime()
     }
@@ -173,6 +183,16 @@ internal object AndroidNotifier
             @Suppress("DEPRECATION")
             vibrator.vibrate(effect, AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_NOTIFICATION).build())
         }
+    }
+
+    /** Silent mode or Do Not Disturb, either of which mutes a notification vibration. */
+    private fun buzzMuted(ctx: Context): Boolean
+    {
+        val ringerSilent = ctx.getSystemService(AudioManager::class.java)?.ringerMode == AudioManager.RINGER_MODE_SILENT
+        val filter = ctx.getSystemService(NotificationManager::class.java)?.currentInterruptionFilter
+        val dnd = filter != null && filter != NotificationManager.INTERRUPTION_FILTER_ALL &&
+            filter != NotificationManager.INTERRUPTION_FILTER_UNKNOWN
+        return ringerSilent || dnd
     }
 
     /** Asks the system what's showing rather than remembering ids, so a restart doesn't strand any. */

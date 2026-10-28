@@ -34,8 +34,11 @@ class GameSessionService : Service()
         private const val ID = 0x5E55
         private const val ACTION_QUIT = "net.runelite.mp.notify.QUIT"
 
+        /** Safe to call repeatedly; MainActivity retries it on every return to the screen. */
         fun start(context: Context)
         {
+            // On a watch an always-on service costs more battery than a background session is worth.
+            if (net.runelite.mp.update.UpdateGate.isWatch(context)) return
             try
             {
                 context.startForegroundService(Intent(context, GameSessionService::class.java))
@@ -61,10 +64,11 @@ class GameSessionService : Service()
         if (intent?.action == ACTION_QUIT)
         {
             // The notification's Quit button: like swiping RuneLite away in Recents, but
-            // exiting normally so the client's shutdown hooks still run.
+            // exiting normally so the client's shutdown hooks still run. exit() waits for
+            // those hooks, so it runs off the main thread to keep a slow one from an ANR.
             getSystemService(ActivityManager::class.java)?.appTasks?.forEach { it.finishAndRemoveTask() }
             stopSelf()
-            Runtime.getRuntime().exit(0)
+            Thread({ Runtime.getRuntime().exit(0) }, "RuneLite-quit").start()
             return START_NOT_STICKY
         }
 
@@ -111,11 +115,5 @@ class GameSessionService : Service()
             stopSelf()
         }
         return START_NOT_STICKY
-    }
-
-    override fun onTaskRemoved(rootIntent: Intent?)
-    {
-        stopSelf()
-        super.onTaskRemoved(rootIntent)
     }
 }

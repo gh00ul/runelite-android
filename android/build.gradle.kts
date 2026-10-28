@@ -258,6 +258,10 @@ if (androidSdkAvailable) {
             // own rebuilds of one upstream version add -PruneliteMp.forkRevision=N, so each
             // compares newer than the last (tags compare numerically per segment).
             val forkRevision = providers.gradleProperty("runeliteMp.forkRevision").orNull
+            // compareTags reads a non-number as 0, which would silently stop fork updates.
+            require(forkRevision == null || forkRevision.toIntOrNull() != null) {
+                "runeliteMp.forkRevision must be a whole number, got '$forkRevision'"
+            }
             buildConfigField("String", "RELEASE_TAG",
                 "\"$versionMajor.$versionMinor.${versionPatch}_${project.version}${forkRevision?.let { "-$it" } ?: ""}\"")
             // Where UpdateChecker looks for releases; forks point it at their own:
