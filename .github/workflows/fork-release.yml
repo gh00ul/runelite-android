@@ -1,0 +1,182 @@
+name: Fork release
+
+# Keeps this fork's app current with nobody at the keyboard. Every 3 hours, and on pushes
+# to android-notifications, it takes zeruth/runelite-android's latest release, replays the
+# android-notifications commits onto it, builds an arm64 APK signed with the same key as
+# every earlier fork release, and publishes it here as <upstream tag>-<forkRevision>. The
+# app checks this repo's latest release on launch and installs it from there.
+#
+# The replay isn't pushed back: GITHUB_TOKEN may not push upstream's own workflow changes,
+# so it lives only in the run, and the release notes name the upstream release it used.
+# When the commits don't apply cleanly, the run fails and opens an issue instead.
+
+on:
+  schedule:
+    - cron: '23 */3 * * *'
+  push:
+    branches: [ android-notifications ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  actions: write
+
+concurrency:
+  group: fork-release
+  cancel-in-progress: false
+
+env:
+  UPSTREAM: zeruth/runelite-android
+  # Signing certificate of every fork release so far. Anything signed otherwise can't
+  # install over them, so it's never published.
+  CERT_SHA256: a68c8e2681d14ca9fd5617b153c0d4f24fbccf1d24aa3a6872da94c47800bf86
+  GH_TOKEN: ${{ github.token }}
+  GRADLE_OPTS: "-Dfile:encoding=UTF-8"
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: android-notifications
+          fetch-depth: 0
+
+      - name: Replay fork commits onto the latest upstream release
+        id: replay
+        run: |
+          FORK_SHA=$(git rev-parse HEAD)
+          UP_TAG=$(gh release view --repo "$UPSTREAM" --json tagName -q .tagName)
+          REV=$(sed -n 's/^runeliteMp\.forkRevision=//p' gradle.properties)
+          test -n "$UP_TAG" && test -n "$REV"
+          TAG="$UP_TAG-$REV"
+          {
+            echo "fork_sha=$FORK_SHA"
+            echo "upstream=$UP_TAG"
+            echo "rev=$REV"
+            echo "tag=$TAG"
+          } >> "$GITHUB_OUTPUT"
+
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "Release $TAG already exists; nothing to do."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git fetch --no-tags "https://github.com/$UPSTREAM.git" "refs/tags/$UP_TAG:refs/tags/upstream-release"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if ! git rebase upstream-release; then
+            git rebase --abort
+            echo "conflict=true" >> "$GITHUB_OUTPUT"
+            echo "::error::The fork's commits don't apply cleanly on $UPSTREAM $UP_TAG"
+            exit 1
+          fi
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+
+      - name: Set up JDK 17
+        if: steps.replay.outputs.publish == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Gradle
+        if: steps.replay.outputs.publish == 'true'
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: wrapper
+
+      # Both pinned NDKs: :android builds shaderc from 27.1's sources, android-awt's cargo
+      # build checks for 28.2 at configure time.
+      - name: Install Android NDKs and Rust target
+        if: steps.replay.outputs.publish == 'true'
+        run: |
+          for f in android/build.gradle.kts android-awt/build.gradle.kts; do
+            v=$(sed -n 's/^\s*ndkVersion\s*=\s*"\(.*\)"/\1/p' "$f" | head -n1)
+            test -n "$v"
+            yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$v" > /dev/null
+          done
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$v" >> "$GITHUB_ENV"
+          rustup target add aarch64-linux-android
+
+      # Phones it's built for are arm64; the other three ABIs would double the download.
+      - name: Build for arm64-v8a only
+        if: steps.replay.outputs.publish == 'true'
+        run: |
+          perl -0pi -e 's/val shadercAbis = listOf\((?:[^()]|\([^()]*\))*\)/val shadercAbis = listOf("arm64-v8a")/' android/build.gradle.kts
+          perl -0pi -e 's/abiFilters \+= listOf\((?:[^()]|\([^()]*\))*\)/abiFilters += listOf("arm64-v8a")/' android/build.gradle.kts android-awt/build.gradle.kts
+          perl -0pi -e 's/targets = listOf\((?:[^()]|\([^()]*\))*\)/targets = listOf("arm64")/' android-awt/build.gradle.kts
+          grep -nE 'shadercAbis = |abiFilters \+=|targets = listOf' android/build.gradle.kts android-awt/build.gradle.kts
+
+      - name: Install the fork's signing key
+        if: steps.replay.outputs.publish == 'true'
+        env:
+          DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$DEBUG_KEYSTORE_BASE64" ]; then echo "::error::secret DEBUG_KEYSTORE_BASE64 is not set"; exit 1; fi
+          dir="${ANDROID_USER_HOME:-$HOME/.android}"
+          mkdir -p "$dir"
+          echo "$DEBUG_KEYSTORE_BASE64" | base64 -d > "$dir/debug.keystore"
+
+      - name: Build APK
+        if: steps.replay.outputs.publish == 'true'
+        run: ./gradlew :android:assembleDebug --console=plain
+
+      - name: Check the APK before publishing
+        if: steps.replay.outputs.publish == 'true'
+        env:
+          TAG: ${{ steps.replay.outputs.tag }}
+        run: |
+          APK=android/build/outputs/apk/debug/android-debug.apk
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n1)
+          CERT=$("$BT/apksigner" verify --print-certs "$APK" | awk -F'digest: ' '/certificate SHA-256 digest/ { print $2; exit }')
+          if [ "$CERT" != "$CERT_SHA256" ]; then echo "::error::APK signed with $CERT, expected $CERT_SHA256"; exit 1; fi
+          CONFIG=android/build/generated/source/buildConfig/debug/net/runelite/mp/BuildConfig.java
+          BUILT=$(sed -n 's/.*RELEASE_TAG = "\(.*\)";/\1/p' "$CONFIG")$(sed -n 's/.*FORK_SUFFIX = "\(.*\)";/\1/p' "$CONFIG")
+          if [ "$BUILT" != "$TAG" ]; then echo "::error::APK reports $BUILT, expected $TAG"; exit 1; fi
+          BADGING=$("$BT/aapt" dump badging "$APK")
+          grep -E "^package:|native-code" <<< "$BADGING"
+          grep -q "native-code: 'arm64-v8a'" <<< "$BADGING"
+
+      - name: Publish release
+        if: steps.replay.outputs.publish == 'true'
+        env:
+          TAG: ${{ steps.replay.outputs.tag }}
+          UP_TAG: ${{ steps.replay.outputs.upstream }}
+          REV: ${{ steps.replay.outputs.rev }}
+          FORK_SHA: ${{ steps.replay.outputs.fork_sha }}
+        run: |
+          APK=runelite-android-notifications.apk
+          cp android/build/outputs/apk/debug/android-debug.apk "$APK"
+          SHA=$(sha256sum "$APK" | cut -d' ' -f1)
+          {
+            echo "Automatic build of zeruth/runelite-android [$UP_TAG](https://github.com/$UPSTREAM/releases/tag/$UP_TAG) with this fork's android-notifications commits (fork revision $REV, branch at $FORK_SHA) replayed on top."
+            echo
+            echo "- Debug build type (not debuggable), arm64-v8a only, signed with the fork's usual key."
+            echo "- SHA-256: \`$SHA\`"
+            echo
+            echo "Phones on an earlier fork release update themselves the next time the app opens."
+          } > notes.md
+          gh release create "$TAG" "$APK" --repo "$GITHUB_REPOSITORY" --target "$FORK_SHA" --latest \
+            --title "$UP_TAG + Android notifications, fork rev $REV (arm64)" --notes-file notes.md
+
+      - name: Open an issue when the commits need a hand
+        if: failure() && steps.replay.outputs.conflict == 'true'
+        env:
+          UP_TAG: ${{ steps.replay.outputs.upstream }}
+        run: |
+          TITLE="Fork update needs a manual merge: $UPSTREAM $UP_TAG"
+          OPEN=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$TITLE\" in:title" --json number -q '.[].number')
+          if [ -z "$OPEN" ]; then
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body "$UPSTREAM released $UP_TAG, and the android-notifications commits don't apply cleanly on it, so no fork release was built. Rebase android-notifications onto $UP_TAG by hand and push; the next run publishes it. Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          fi
+
+      # GitHub switches off schedules in public repos after 60 days without activity;
+      # re-enabling resets that clock.
+      - name: Keep the schedule alive
+        if: always() && github.event_name == 'schedule'
+        run: gh api -X PUT "repos/$GITHUB_REPOSITORY/actions/workflows/fork-release.yml/enable"
