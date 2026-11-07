@@ -599,3 +599,18 @@ if (androidSdkAvailable) {
         )
     }
 }
+
+// Fork releases are debug builds. For an unminified build AGP replaces the L8 task's keep
+// rules with its own list after configureEach actions run, which drops the "-keep class
+// j$.**" above. The game client dexed on the device then can't find j$.util.Collection and
+// the app crashes while loading. A configure action added once AGP has registered the task
+// runs after AGP's own, so the rule sticks.
+if (androidSdkAvailable) {
+    afterEvaluate {
+        tasks.withType<com.android.build.gradle.internal.tasks.L8DexDesugarLibTask>().names.forEach { name ->
+            tasks.named<com.android.build.gradle.internal.tasks.L8DexDesugarLibTask>(name) {
+                keepRulesConfigurations.add("-keep class j$.** { *; }")
+            }
+        }
+    }
+}

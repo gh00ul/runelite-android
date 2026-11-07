@@ -148,6 +148,16 @@ jobs:
           BADGING=$("$BT/aapt" dump badging "$APK")
           grep -E "^package:|native-code" <<< "$BADGING"
           grep -q "native-code: 'arm64-v8a'" <<< "$BADGING"
+          # The phone dexes the game client against the APK's j$ library at first launch.
+          # Rev 4 shipped without j$.util.Collection and crashed on every launch.
+          DEX="$RUNNER_TEMP/dex"
+          rm -rf "$DEX" && mkdir -p "$DEX"
+          unzip -q "$APK" 'classes*.dex' -d "$DEX"
+          if ! "$BT/dexdump" -h "$DEX"/classes*.dex 2> /dev/null \
+              | awk '/Class descriptor *: .Lj\$\/util\/Collection;./ { found = 1 } END { exit !found }'; then
+            echo "::error::APK lacks j\$.util.Collection; the game client would crash at launch"
+            exit 1
+          fi
 
       - name: Publish release
         if: steps.replay.outputs.publish == 'true'
