@@ -121,6 +121,9 @@ object WindowImpl
                                 if (key != NAV_KEY_PLUGINS) configTarget.value = null
                             },
                         )
+                        // Dead strip at the screen edge: a hand holding the phone rests here
+                        // and kept tapping the icons. Nothing handles touches on it.
+                        Spacer(Modifier.width(12.dp).fillMaxHeight())
                     }
                 }
             }
