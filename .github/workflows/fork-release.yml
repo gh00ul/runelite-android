@@ -118,9 +118,16 @@ jobs:
           DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
         run: |
           if [ -z "$DEBUG_KEYSTORE_BASE64" ]; then echo "::error::secret DEBUG_KEYSTORE_BASE64 is not set"; exit 1; fi
-          dir="${ANDROID_USER_HOME:-$HOME/.android}"
+          env | grep -E '^ANDROID_(USER_HOME|PREFS_ROOT|SDK_HOME)=' || true
+          dir="$RUNNER_TEMP/android-user"
           mkdir -p "$dir"
           echo "$DEBUG_KEYSTORE_BASE64" | base64 -d > "$dir/debug.keystore"
+          FP=$(keytool -list -v -keystore "$dir/debug.keystore" -storepass android -alias androiddebugkey \
+            | awk '$1 == "SHA256:" { gsub(":", "", $2); print tolower($2); exit }')
+          if [ "$FP" != "$CERT_SHA256" ]; then echo "::error::DEBUG_KEYSTORE_BASE64 holds key $FP, expected $CERT_SHA256"; exit 1; fi
+          # AGP signs debug builds with <ANDROID_USER_HOME>/debug.keystore and otherwise makes
+          # a fresh one of its own (that's what the first run signed with), so point it here.
+          echo "ANDROID_USER_HOME=$dir" >> "$GITHUB_ENV"
 
       - name: Build APK
         if: steps.replay.outputs.publish == 'true'
