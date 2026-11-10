@@ -1,5 +1,7 @@
 # runelite-android
 
+> **TL;DR:** Unofficial RuneLite (OSRS client) for Android.
+
 An unofficial Android port of [RuneLite](https://runelite.net), the open-source Old School RuneScape client, packaged as a standalone APK (`net.runelite.mp`).
 
 ---
